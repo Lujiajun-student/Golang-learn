@@ -527,3 +527,599 @@ func PrintHello(c *gin.Context) {
 如果使用`c.Abort()`，那么当前中间件执行完毕后，就不会继续向后执行，而是直接停止程序。
 
 同样的，如果在路由组中使用中间件，就只有当前的路由组会执行中间件，其他组不会。
+
+和路由分组一样，中间件最好在middleware包下定义。
+
+在middle下的`init.go`中定义下面的中间件。
+
+```go
+package middle
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/gin-gonic/gin"
+)
+
+func InitMiddleware(c *gin.Context) {
+	fmt.Println(time.Now())
+	fmt.Println("请求路径: ", c.Request.URL)
+}
+
+func PrintHello(c *gin.Context) {
+	fmt.Println("Hello World")
+}
+```
+
+然后在`main.go`中使用即可。
+
+```go
+package main
+
+import (
+	"Golang-learn/Demo5_middleware/middle"
+
+	"github.com/gin-gonic/gin"
+)
+
+func main() {
+	r := gin.Default()
+	// 全局使用中间件
+	r.Use(middle.InitMiddleware)
+	// 针对某个请求使用中间件
+	r.GET("/", func(c *gin.Context) {
+		c.String(200, "首页")
+	}, middle.PrintHello)
+
+	r.Run(":8080")
+}
+```
+
+### 1.5.1 中间件数据共享
+
+想要共享数据，使用上下文即可，所有中间件和请求共享一个上下文`*gin.Context`。
+
+```go
+c.Set("username", "张三")
+fmt.Println(c.Get("username")) // 张三
+```
+
+## 1.6 自定义Model
+
+如果项目比较简单，可以在Controller中处理业务逻辑。但如果比较复杂，多个业务存在重复的功能，那么可以把公共的功能抽取出来作为一个模块。
+
+比如打印时间`PrintTime`在多个功能中均使用到，就把这个函数放到`models`包下，在其他功能中调用`models.PrintTime`即可。
+
+## 1.7 文件上传
+
+这里需要实现文件的上传。
+
+首先在templates下准备好输入用户名和头像。
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+    <p>示例{{.message}}</p>
+    <form action="/doUpload" method="post" enctype="multipart/form-data">
+        用户名：<input type="text" name="username", placeholder="用户名"><br><br>
+        头像：<input type="file" name="face"><br><br>
+        <input type="submit" value="提交">
+    </form>
+</body>
+</html>
+```
+
+然后在一个路径展示页面，一个路径在点击跳转后执行文件上传即可。
+
+```go
+package main
+
+import (
+	"log"
+
+	"github.com/gin-gonic/gin"
+)
+
+func main() {
+	router := gin.Default()
+	// 指定最大上传文件大小为8MB
+	router.MaxMultipartMemory = 8 << 20
+	// 指定静态页面的位置
+	router.LoadHTMLGlob("templates/*")
+	// 指定上传接口，用来展示上传图片的页面
+	router.GET("/upload", func(c *gin.Context) {
+		c.HTML(200, "index.html", gin.H{})
+	})
+	// 点击页面的提交按钮后，执行下面的请求
+	router.POST("/doUpload", func(c *gin.Context) {
+		// 从上下文中读取上传的文件
+		file, err := c.FormFile("face")
+		if err != nil {
+			c.String(200, "upload failed")
+		}
+		log.Println(file.Filename)
+		// 将文件保存到当前项目的upload目录下
+		err = c.SaveUploadedFile(file, "./upload/"+file.Filename)
+		if err != nil {
+			c.String(400, "failed to save file")
+			return
+		}
+		c.String(200, "上传成功")
+	})
+	router.Run(":8080")
+}
+```
+
+### 1.7.1 多文件上传
+
+多文件上传比较简单，在页面中保证多个file标签的name一致即可。
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+    <p>示例{{.message}}</p>
+    <form action="/doUpload" method="post" enctype="multipart/form-data">
+        用户名：<input type="text" name="username", placeholder="用户名"><br><br>
+        头像：<input type="file" name="face"><br><br>
+        <input type="file" name="face"><br><br>
+        <input type="file" name="face"><br><br>
+        <input type="submit" value="提交">
+    </form>
+</body>
+</html>
+```
+
+然后在接收请求中通过MultipartForm能够读取到当前的表单数据，通过表单数据能够获取文件组，通过文件组即可操作单个文件。
+
+```go
+package main
+
+import (
+	"log"
+
+	"github.com/gin-gonic/gin"
+)
+
+func main() {
+	router := gin.Default()
+	// 指定最大上传文件大小为8MB
+	router.MaxMultipartMemory = 8 << 20
+	// 指定静态页面的位置
+	router.LoadHTMLGlob("templates/*")
+	// 指定上传接口，用来展示上传图片的页面
+	router.GET("/upload", func(c *gin.Context) {
+		c.HTML(200, "index.html", gin.H{})
+	})
+	// 点击页面的提交按钮后，执行下面的请求
+	router.POST("/doUpload", func(c *gin.Context) {
+		// 从上下文中读取上传的文件
+		form, _ := c.MultipartForm()
+		files := form.File["upload[]"]
+		for _, file := range files {
+			log.Println(file.Filename)
+			// 将文件保存到当前项目的upload目录下
+			err := c.SaveUploadedFile(file, "./upload/"+file.Filename)
+			if err != nil {
+				c.String(400, "failed to save file")
+				return
+			}
+		}
+		c.String(200, "上传成功")
+	})
+	router.Run(":8080")
+}
+```
+
+## 1.8 Cookie
+
+HTTP是无状态的协议。先后访问两个路径的话，这两次请求不会有任何关系。
+
+因此，为了实现状态，需要通过Cookie或者session来保存信息。
+
+使用Cookie能够保持用户的登录状态、保存用户的历史记录、保存用户的喜好和购物车等。
+
+```go
+package itying
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
+type DefaultController struct{}
+
+func (con DefaultController) Index(c *gin.Context) {
+	//设置cookie
+	//3600表示的是秒
+	c.SetCookie("username", "张三", 3600, "/", "localhost", false, true)
+
+	//过期时间延时
+	c.SetCookie("hobby", "吃饭 睡觉", 5, "/", "localhost", false, true)
+
+	c.HTML(http.StatusOK, "default/index.html", gin.H{
+		"msg": "我是一个msg",
+		"t":   1629788418,
+	})
+}
+func (con DefaultController) News(c *gin.Context) {
+	//获取cookie
+	username, _ := c.Cookie("username")
+	hobby, _ := c.Cookie("hobby")
+	c.String(200, "username=%v----hobby=%v", username, hobby)
+}
+
+func (con DefaultController) Shop(c *gin.Context) {
+	//获取cookie
+	username, _ := c.Cookie("username")
+	hobby, _ := c.Cookie("hobby")
+	c.String(200, "username=%v----hobby=%v", username, hobby)
+}
+func (con DefaultController) DeleteCookie(c *gin.Context) {
+	//删除cookie
+	c.SetCookie("username", "张三", -1, "/", "localhost", false, true)
+	c.String(200, "删除成功")
+}
+```
+
+这里setCookie有多个参数。参数name表示键，value表示值，maxAge表示存储最大秒数，path表示访问路径，domain表示哪些路径可以访问，secure表示是否在http中保存cookie，否则只在https中保存，httpOnly表示能否通过js脚本等读取cookie信息。
+
+删除Cookie只需要重新设置对应的Cookie，设置时间为-1即可。
+
+## 1.9 Session
+
+Session是将记录保存在服务器上，而不像Cookie保存在浏览器。
+
+客户端浏览器访问服务器发送请求时，服务器会创建一个session，将用户的请求以key-value的形式生成，将value保存在服务器上，将key返回到浏览器。这样，浏览器访问时会携带key，可以在浏览器上找到对应的value。
+
+```cmd
+go get github.com/gin-contrib/sessions
+```
+
+首先随意构建一个双层架构。
+
+![image-20260316102303894](README_Picture/image-20260316102303894.png)
+
+![image-20260316102337130](README_Picture/image-20260316102337130.png)
+
+![image-20260316102342959](README_Picture/image-20260316102342959.png)
+
+![image-20260316102348134](README_Picture/image-20260316102348134.png)
+
+首先如果想要用session，需要先配置中间件。
+
+接下来，就可以通过上下文取出session，通过set和save保存键值对，然后使用get来取出信息。
+
+接下来在UserController中使用session。
+
+```go
+package user
+
+import (
+	"github.com/bytedance/gopkg/util/logger"
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-gonic/gin"
+)
+
+func UserInfo(c *gin.Context) {
+	// 取出session对象
+	session := sessions.Default(c)
+	// 使用session对象来设置数据
+	session.Set("username", "张三")
+	// 设置完数据后，需要调用session.Save()方法来保存数据
+	err := session.Save()
+	if err != nil {
+		logger.Warn("session save failed, err: %v", err)
+	}
+	c.JSON(200, gin.H{
+		"msg": "user info",
+	})
+}
+
+func UserNews(c *gin.Context) {
+	// 取出session对象
+	session := sessions.Default(c)
+	// 通过session对象来获取数据
+	username := session.Get("username")
+	c.JSON(200, gin.H{
+		"msg":      "user news",
+		"username": username,
+	})
+}
+```
+
+### 1.9.1 配置到Redis
+
+如果要使用Redis来保存session，只需在设置中间件时更换为redis即可。
+
+```go
+package main
+
+import (
+	"Golang-learn/Demo8_session/router/adminRouter"
+	"Golang-learn/Demo8_session/router/defaultRouter"
+	"Golang-learn/Demo8_session/router/userRouter"
+
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-contrib/sessions/redis"
+	"github.com/gin-gonic/gin"
+)
+
+func main() {
+	router := gin.Default()
+	// 配置session中间件
+	// cookie.NewStore 表示将session保存到浏览器的Cookie中,密钥选择为secret123
+	store, _ := redis.NewStore(10, "tcp", "localhost:6379", "", "", []byte("secret123"))
+	// 设置Session在Cookie的保存名称，可通过sessions.Default(c)来获取这个session对象
+	router.Use(sessions.Sessions("mysession", store))
+
+	userRouter.InitUserRouter(router)
+	adminRouter.InitAdminRouter(router)
+	defaultRouter.InitDefaultRouter(router)
+	router.Run(":8080")
+}
+```
+
+需要保证Docker的Redis开启。
+
+在Redis中能够看到保存的session。
+
+![image-20260316111233869](README_Picture/image-20260316111233869.png)
+
+![image-20260316111341469](README_Picture/image-20260316111341469.png)
+
+## 1.10 GORM增删改查
+
+GORM用于建立结构体到数据库表的映射。
+
+```cmd
+go get -u gorm.io/gorm
+go get -u gorm.io/driver/sqlite
+go get gorm.io/driver/mysql
+```
+
+首先创建数据库。
+
+```mysql
+create database `gin`;
+use `gin`;
+create table `user`(
+    `id` int not null auto_increment primary key,
+    `username` varchar(255),
+    `age` tinyint,
+    `email` varchar(255),
+    `add_time` int not null default 0
+);
+```
+
+首先以上面的session为基础，在UserRouter中添加`userGroup.POST("/create", user.CreateUser)`，用来实现往数据库添加数据。
+
+为了使用GORM，需要先连接数据库。在model的`core.go`中进行连接。
+
+```go
+package model
+
+import (
+	"github.com/bytedance/gopkg/util/logger"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+)
+
+var DB *gorm.DB
+var err error
+
+func InitMySQL() {
+	dsn := "root:jia.1113.me.@tcp(127.0.0.1:3307)/gin?charset-utf8mb4&parseTime=True&loc=Local"
+	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		logger.Error(err.Error())
+	}
+}
+```
+
+这里是3307的原因是没有使用本地mysql，使用的是docker的mysql。
+
+然后在model下创建`user.go`，用来实现从数据库到结构体的映射。
+
+```go
+package models
+
+// User 用户模型
+type User struct {
+	Id       int
+	Username string
+	Age      int
+	Email    string
+	AddTime  int
+}
+
+// TableName 接口，指定表名
+func (User) TableName() string {
+	return "user"
+}
+```
+
+接着修改user的Controller和Router，用来实现增删改查。
+
+```go
+package user
+
+import (
+	"github.com/bytedance/gopkg/util/logger"
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-gonic/gin"
+)
+
+func UserInfo(c *gin.Context) {
+	// 取出session对象
+	session := sessions.Default(c)
+	// 使用session对象来设置数据
+	session.Set("username", "张三")
+	// 设置完数据后，需要调用session.Save()方法来保存数据
+	err := session.Save()
+	if err != nil {
+		logger.Warn("session save failed, err: %v", err)
+	}
+	c.JSON(200, gin.H{
+		"msg": "user info",
+	})
+}
+
+func UserNews(c *gin.Context) {
+	// 取出session对象
+	session := sessions.Default(c)
+	// 通过session对象来获取数据
+	username := session.Get("username")
+	c.JSON(200, gin.H{
+		"msg":      "user news",
+		"username": username,
+	})
+}
+
+func CreateUser(c *gin.Context) {
+	c.JSON(200, gin.H{
+		"msg": "create user",
+	})
+}
+
+func ShowUser(c *gin.Context) {
+	c.JSON(200, gin.H{
+		"msg": "show user",
+	})
+}
+
+func EditUser(c *gin.Context) {
+	c.JSON(200, gin.H{
+		"msg": "edit user",
+	})
+}
+
+func DeleteUser(c *gin.Context) {
+	c.JSON(200, gin.H{
+		"msg": "delete user",
+	})
+}
+```
+
+```go
+package userRouter
+
+import (
+	"Golang-learn/Demo9_gorm/controller/user"
+
+	"github.com/gin-gonic/gin"
+)
+
+func InitUserRouter(r *gin.Engine) {
+	userGroup := r.Group("/user")
+	{
+		userGroup.GET("/info", user.UserInfo)
+
+		userGroup.GET("/news", user.UserNews)
+
+		userGroup.POST("/create", user.CreateUser)
+
+		userGroup.PUT("/edit", user.EditUser)
+
+		userGroup.DELETE("/delete", user.DeleteUser)
+		
+		userGroup.GET("/show", user.ShowUser)
+	}
+}
+```
+
+接下来需要在Controller中实现增删改查的方法。
+
+1. 查询所有用户。
+
+```go
+// ShowUser 查询所有用户
+func ShowUser(c *gin.Context) {
+	// 查询数据库
+	var userList []models.User
+
+	models.DB.Find(&userList)
+	
+	// 筛选年龄大于20的
+	//models.DB.Where("age > ?", 20).Find(&userList)
+
+	c.JSON(http.StatusOK, gin.H{
+		"result": userList,
+	})
+}
+```
+
+这样，就能实现用户的查询功能。如果需要实现条件查询，可以使用`models.DB.Where`。
+
+![image-20260316145711452](README_Picture/image-20260316145711452.png)
+
+2. 新增用户。
+
+```go
+// CreateUser 新增用户
+func CreateUser(c *gin.Context) {
+	// 模拟新增用户
+	user := models.User{
+		Username: "李四",
+		Age:      20,
+		AddTime:  int(time.Now().Unix()),
+	}
+	// 新增用户到数据库
+	models.DB.Create(&user)
+	c.JSON(200, gin.H{
+		"msg": "create user success",
+	})
+}
+```
+
+![image-20260316150535409](README_Picture/image-20260316150535409.png)
+
+3. 修改用户。
+
+```go
+// EditUser 更新用户
+func EditUser(c *gin.Context) {
+	// 获取用户
+	user := models.User{Id: 2}
+	models.DB.Find(&user)
+	// 设置更新后的用户信息
+	user.Username = "王五"
+	models.DB.Save(&user)
+	// 更新用户
+	models.DB.Updates(&user).Where("id=?", 2)
+	c.JSON(200, gin.H{
+		"msg": "edit user success",
+	})
+}
+```
+
+一般情况下，浏览器中需要更新用户时，仅有用户的id。因此，需要实现根据用户id查找用户的全部信息，然后修改信息，最后再调用`Save()`来保存新的信息。
+
+4. 删除用户。
+
+```go
+// DeleteUser 删除用户
+func DeleteUser(c *gin.Context) {
+	// 先获取用户id
+	user := models.User{Id: 3}
+	// 只需要id即可实现删除
+	models.DB.Delete(&user)
+	
+	c.JSON(200, gin.H{
+		"msg": "delete user success",
+	})
+}
+```
+
+由于删除操作不需要太多操作，可以根据当前用户的id来执行删除。

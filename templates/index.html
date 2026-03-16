@@ -6,5 +6,12 @@
 </head>
 <body>
     <p>示例{{.message}}</p>
+    <form action="/doUpload" method="post" enctype="multipart/form-data">
+        用户名：<input type="text" name="username", placeholder="用户名"><br><br>
+        头像：<input type="file" name="face"><br><br>
+        <input type="file" name="face"><br><br>
+        <input type="file" name="face"><br><br>
+        <input type="submit" value="提交">
+    </form>
 </body>
 </html>
