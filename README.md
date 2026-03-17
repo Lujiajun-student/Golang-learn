@@ -1123,3 +1123,409 @@ func DeleteUser(c *gin.Context) {
 ```
 
 由于删除操作不需要太多操作，可以根据当前用户的id来执行删除。
+
+## 1.11 添加查询条件
+
+如果不需要查询所有的字段，只需要查询部分的字段，可以使用Select。
+
+```go
+models.DB.Select("id, title").Find(&userList)
+```
+
+如果需要升序或者降序排列，可以使用Order来指定。
+
+```go
+models.DB.Order("id desc").Find(&userList)
+```
+
+如果要间隔查询，跳过前面的数据进行查询，可以使用Offset。
+
+```go
+models.DB.Order("id desc").Offset(1).Limit(2).Find(&userList)
+```
+
+> 如果存在1-5id的User，这会使id为1的被跳过，然后根据limit的2，会向后读取两个User，最终2和3被读取出来。
+
+查询总数使用Count。
+
+```go
+models.DB.Find(&userList).Count(&num)
+```
+
+如果使用方法不方便，可以使用原生SQL语句。
+
+```go
+models.DB.Raw("SELECT id, name, age FROM user WHERE id = ?", 3).Scan(&result)
+```
+
+这种是需要接收原生SQL语句的返回数据。如果不需要返回数据，使用Exec即可。
+
+```go
+models.DB.Exec("DELETE FROM user WHERE id = ?", 5)
+```
+
+## 1.12 表关联查询
+
+```mysql
+use `gin`;
+create table `article`(
+    id int not null auto_increment primary key,
+    title varchar(255),
+    article_cate_id int,
+    state int
+);
+create table `article_cate`(
+    id int not null auto_increment primary key,
+    title varchar(255),
+    state int
+)
+```
+
+![image-20260317104954532](README_Picture/image-20260317104954532.png)
+
+![image-20260317105003466](README_Picture/image-20260317105003466.png)
+
+这个article保存的是分类的id，现在需要实现查询时能够查询article的同时，将cate_id替换为分类。
+
+原生MySQL能够通过下面的语句实现关联查询。
+
+```mysql
+select a.title, c.title, a.state from article as a join article_cate as c on a.cate_id = c.id;
+```
+
+![image-20260317105355728](README_Picture/image-20260317105355728.png)
+
+这样，需要准备article和article_cate的model。
+
+```go
+package models
+
+type Article struct {
+	Id            int
+	Title         string
+	ArticleCateId int
+	State         int
+	ArticleCate   ArticleCate
+}
+
+func (Article) TableName() string {
+	return "article"
+}
+```
+
+```go
+package models
+
+type ArticleCate struct {
+	Id    int
+	Title string
+	State int
+}
+
+func (ArticleCate) TableName() string {
+	return "article_cate"
+}
+```
+
+这样，就算是实现了数据库表对应的结构体。其中，为了实现关联查询，Article结构体需要添加ArticleCateId作为外检，以及保存ArticleCate结构体来进行关联。
+
+那么，在articleController中实现关联查询。
+
+```go
+package controller
+
+import (
+	"Golang-learn/Demo10_mysql_table/models"
+
+	"github.com/gin-gonic/gin"
+)
+
+type ArticleController struct {
+	BaseController
+}
+
+func (ArticleController) List(c *gin.Context) {
+
+	var articleList []models.Article
+	// Preload 用于关联查询，在执行Find查询前，先预查询ArticleCate的记录，然后根据外键ArticleCateId来关联查询ArticleCate的记录
+	models.DB.Preload("ArticleCate").Find(&articleList)
+	c.JSON(200, gin.H{
+		"articleList": articleList,
+	})
+
+}
+```
+
+> 这样，通过Preload能够先通过`SELECT * FROM article_cate`来查询`article_cate`表，然后根据结构体中设置的外键`ArticleCateId`来作为外键进行关联，使得article表的`article_cate_id`与`article_cate`的id进行匹配。
+
+Preload方法需要注意，在article结构体中需要绑定关联查询表的结构体和外键才能进行关联查询。
+
+而如果外键的名字比较混乱，Gin无法识别，那么就需要手动指定外键。
+
+```go
+package models
+
+type Article struct {
+	Id            int
+	Title         string
+	CateId 		int
+	State         int
+    ArticleCate   ArticleCate `gorm:"foreignKey:CateId"`
+}
+
+func (Article) TableName() string {
+	return "article"
+}
+```
+
+这样显式指定，Gin就能识别到外键。
+
+接下来还有另一个方向的查询，查询ArticleCate能够获取文章。
+
+```go
+package models
+
+type ArticleCate struct {
+	Id    int
+	Title string
+	State int
+	Article []Article `gorm:"foreignkey:ArticleCateId"`
+}
+
+func (ArticleCate) TableName() string {
+	return "article_cate"
+}
+```
+
+这样，能够将当前的Article与ArticleCateId进行关联，能够一并查询出来。
+
+```go
+package controller
+
+import (
+	"Golang-learn/Demo10_mysql_table/models"
+
+	"github.com/gin-gonic/gin"
+)
+
+type ArticleController struct {
+	BaseController
+}
+
+func (ArticleController) List(c *gin.Context) {
+
+	var articleList []models.Article
+	// Preload 用于关联查询，在执行Find查询前，先预查询ArticleCate的记录，然后根据外键ArticleCateId来关联查询ArticleCate的记录
+	models.DB.Preload("ArticleCate").Find(&articleList)
+	c.JSON(200, gin.H{
+		"articleList": articleList,
+	})
+}
+
+func (ArticleController) ArticleCateList(c *gin.Context) {
+	var articleCateList []models.ArticleCate
+	// 先通过Preload预查询Article记录，然后再根据外键ArticleCateId来关联查询ArticleCate的记录
+	models.DB.Preload("Article").Find(&articleCateList)
+	c.JSON(200, gin.H{
+		"articleCateList": articleCateList,
+	})
+}
+```
+
+
+
+## 1.12 GORM事务
+
+GORM中默认在事务中执行写入操作。如果不需要事务的话，可以进行关闭。
+
+```go
+package models
+
+import (
+	"github.com/bytedance/gopkg/util/logger"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+)
+
+var DB *gorm.DB
+var err error
+
+func InitMySQL() {
+	dsn := "root:jia.1113.me.@tcp(127.0.0.1:3307)/gin?charset-utf8mb4&parseTime=True&loc=Local"
+	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
+        // 禁用事务
+		SkipDefaultTransaction: true,
+	})
+	if err != nil {
+		logger.Error(err.Error())
+	}
+}
+```
+
+现在使用user表，准备给表里的人的age均添加1。
+
+```go
+package controller
+
+import (
+	"Golang-learn/Demo11_transaction/models"
+
+	"github.com/bytedance/gopkg/util/logger"
+	"github.com/gin-gonic/gin"
+)
+
+type UserController struct {
+}
+
+func (UserController) UserInfo(c *gin.Context) {
+
+	// 开启事务
+	tx := models.DB.Begin()
+
+	// id为1的人age涨1岁
+	user := models.User{Id: 1}
+	tx.Find(&user)
+	user.Age += 1
+	tx.Save(&user)
+
+	// 触发异常，此时程序会继续执行，如果不显式调用Rollback()，则会运行后面的Commit，导致错误的数据被提交
+	if true {
+		tx.Rollback()
+		logger.Error("error")
+	}
+
+	// 触发错误
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+	if true {panic("panic")}
+	// id为2的人age涨1岁
+	user = models.User{Id: 2}
+	tx.Find(&user)
+	user.Age += 1
+	tx.Save(&user)
+
+	// 事务提交
+	tx.Commit()
+
+	c.JSON(200, gin.H{
+		"message": "user info",
+	})
+}
+```
+
+在这里由于Gin的事务属于单语句的，每条语句单独使用事务，因此会出现第一个用户更新了age，而第二个用户没有更新age，就导致了数据库不一致。其中需要使用事务的操作使用`tx`来代替`models.DB`来进行操作。
+
+## 1.13 go-ini
+
+### 1.13.1 读取ini配置文件
+
+对于go来说，ini配置文件的读取效率比yaml读取效率更高，go-ini比Viper更轻量。
+
+ini配置文件写在conf包下的`app.ini`。
+
+```ini
+app_name = Demo12_ini
+
+log_level = DEBUG
+
+[mysql]
+ip = 127.0.0.1
+port = 3307
+user = root
+password = jia.1113.me.
+database = gin
+
+[redis]
+ip = 127.0.0.1
+port = 6379
+```
+
+```cmd
+go get gopkg.in/ini.v1
+```
+
+然后使用`ini.Load()`即可。
+
+```go
+package models
+
+import (
+	"fmt"
+
+	"github.com/bytedance/gopkg/util/logger"
+	"gopkg.in/ini.v1"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+)
+
+var DB *gorm.DB
+var err error
+
+func InitMySQL() {
+	config, err := ini.Load("./Demo12_ini/config/app.ini")
+	if err != nil {
+		logger.Error(err.Error())
+	}
+	username := config.Section("mysql").Key("user").String()
+	password := config.Section("mysql").Key("password").String()
+	ip := config.Section("mysql").Key("ip").String()
+	port := config.Section("mysql").Key("port").String()
+	database := config.Section("mysql").Key("database").String()
+
+	dsn := fmt.Sprintf("%v:%v@tcp(%v:%v)/%v?charset=utf8mb4&parseTime=True&loc=Local",
+		username, password, ip, port, database)
+	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		logger.Error(err.Error())
+	}
+}
+```
+
+这里能够看到，首先通过`ini.Load()`读取到配置文件，然后通过Section来获取到需要的分区，如mysql分区表示`[mysql]`下的属性，再通过`Key`来根据键名来获取值。
+
+### 1.13.2 写入配置文件
+
+还有一些要求，可能需要写入当前的配置文件中。
+
+```go
+package main
+
+import (
+	"Golang-learn/Demo12_ini/models"
+	"Golang-learn/Demo12_ini/router"
+
+	"github.com/bytedance/gopkg/util/logger"
+	"github.com/gin-gonic/gin"
+	"gopkg.in/ini.v1"
+)
+
+func main() {
+	r := gin.Default()
+	models.InitMySQL()
+	router.InitUserRouter(r)
+	config, err := ini.Load("./Demo12_ini/config/app.ini")
+	if err != nil {
+		logger.Error(err.Error())
+	}
+	config.Section("").Key("set_new_key").SetValue("new_value")
+	// 写完后需要保存
+	err = config.SaveTo("./Demo12_ini/config/app.ini")
+	if err != nil {
+		logger.Error(err.Error())
+	}
+	r.Run()
+}
+```
+
+这样，就能写入新的配置信息。
+
+![image-20260317155701983](README_Picture/image-20260317155701983.png)
+
+# 2. 微服务
+
+微服务就是将系统通过组件化的方式进行拆分。
+
+**接下来是go-micro和go+k8s，这两个需要付费，因此结束。**

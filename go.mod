@@ -44,6 +44,7 @@ require (
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
+	gopkg.in/ini.v1 v1.67.1 // indirect
 	gorm.io/driver/mysql v1.6.0 // indirect
 	gorm.io/driver/sqlite v1.6.0 // indirect
 	gorm.io/gorm v1.31.1 // indirect
