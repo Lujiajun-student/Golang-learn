@@ -920,7 +920,7 @@ var DB *gorm.DB
 var err error
 
 func InitMySQL() {
-	dsn := "root:jia.1113.me.@tcp(127.0.0.1:3307)/gin?charset-utf8mb4&parseTime=True&loc=Local"
+    dsn := "root:${password}@tcp(127.0.0.1:3307)/gin?charset-utf8mb4&parseTime=True&loc=Local"
 	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
 		logger.Error(err.Error())
@@ -1351,7 +1351,7 @@ var DB *gorm.DB
 var err error
 
 func InitMySQL() {
-	dsn := "root:jia.1113.me.@tcp(127.0.0.1:3307)/gin?charset-utf8mb4&parseTime=True&loc=Local"
+    dsn := "root:${password}@tcp(127.0.0.1:3307)/gin?charset-utf8mb4&parseTime=True&loc=Local"
 	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
         // 禁用事务
 		SkipDefaultTransaction: true,
@@ -1435,7 +1435,7 @@ log_level = DEBUG
 ip = 127.0.0.1
 port = 3307
 user = root
-password = jia.1113.me.
+password = ${password}
 database = gin
 
 [redis]
